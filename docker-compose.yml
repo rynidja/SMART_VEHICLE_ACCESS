@@ -1,0 +1,99 @@
+# Smart Vehicle License Scanner
+# Docker Compose configuration for development environment
+
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: sva_postgres
+    environment:
+      POSTGRES_DB: license_scanner
+      POSTGRES_USER: sva_user
+      POSTGRES_PASSWORD: sva_password
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - sva_network
+
+  # Redis for caching and message queue
+  redis:
+    image: redis:7-alpine
+    container_name: sva_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - sva_network
+
+  # FastAPI Backend
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: sva_backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://sva_user:sva_password@postgres:5432/license_scanner
+      - REDIS_URL=redis://redis:6379
+      - SECRET_KEY=your-secret-key-change-in-production
+    volumes:
+      - ./backend:/app
+      - ./data:/app/data
+      - ./models:/app/models
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - sva_network
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+  # React Frontend
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: sva_frontend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - REACT_APP_API_URL=http://localhost:8000
+    depends_on:
+      - backend
+    networks:
+      - sva_network
+    command: npm start
+
+  # CVAT for annotation (optional)
+  cvat:
+    image: openvino/cvat_server:latest
+    container_name: sva_cvat
+    ports:
+      - "8080:8080"
+    environment:
+      - CVAT_HOST=localhost
+    volumes:
+      - cvat_data:/home/django/data
+      - cvat_logs:/home/django/logs
+    networks:
+      - sva_network
+
+volumes:
+  postgres_data:
+  redis_data:
+  cvat_data:
+  cvat_logs:
+
+networks:
+  sva_network:
+    driver: bridge
