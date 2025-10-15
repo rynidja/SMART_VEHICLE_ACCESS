@@ -1,80 +1,79 @@
 # Smart Vehicle License Scanner - Python Dependencies
 # Core Framework and API
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-pydantic==2.5.0
-pydantic-settings==2.1.0
+fastapi==0.119.0
+uvicorn[standard]==0.37.0
+pydantic==2.12.2
+pydantic-settings==2.11.0
 
 # Database and ORM
-sqlalchemy==2.0.23
-alembic==1.13.1
-psycopg2-binary==2.9.9
-asyncpg==0.29.0
+sqlalchemy==2.0.44
+alembic==1.17.0
+psycopg2-binary==2.9.11
+asyncpg==0.30.0
 
 # Image Processing and Computer Vision
-opencv-python==4.8.1.78
-opencv-contrib-python==4.8.1.78
-pillow==10.1.0
-numpy==1.24.3
-scipy==1.11.4
+opencv-python==4.12.0.88
+opencv-contrib-python==4.10.0.84
+pillow==11.3.0
+numpy==2.2.6
+scipy==1.16.2
 
 # Machine Learning and Deep Learning
-torch==2.1.1
-torchvision==0.16.1
+torch==2.8.0
+torchvision==0.23.0
 ultralytics==8.0.196  # YOLOv8
-onnxruntime==1.16.3
-tensorrt==8.6.1  # Optional: for NVIDIA GPU acceleration
+onnxruntime==1.23.1
+#tensorrt==10.13.3.9  # Optional: for NVIDIA GPU acceleration
 
 # OCR and Text Recognition
-paddlepaddle==2.5.2
-paddleocr==2.7.3
-pytesseract==0.3.10
-easyocr==1.7.0
+paddlepaddle==3.2.0
+paddleocr==3.2.0
+pytesseract==0.3.13
+easyocr==1.7.2
 
 # Video Processing
-imageio==2.31.6
-imageio-ffmpeg==0.4.9
+imageio==2.37.0
+imageio-ffmpeg==0.6.0
 ffmpeg-python==0.2.0
 
 # Security and Cryptography
-cryptography==41.0.8
+cryptography==46.0.2
 passlib[bcrypt]==1.7.4
-python-jose[cryptography]==3.3.0
-python-multipart==0.0.6
+python-jose[cryptography]==3.5.0
+python-multipart==0.0.20
 
 # HTTP and WebSocket
-httpx==0.25.2
-websockets==12.0
-aiofiles==23.2.1
+httpx==0.28.1
+websockets==15.0.1
+aiofiles==25.1.0
 
 # Message Queue and Caching
-redis==5.0.1
-nats-py==2.3.0
+redis==6.4.0
+nats-py==2.11.0
 
 # Data Processing and Analysis
-pandas==2.1.4
-openpyxl==3.1.2  # For Excel export
-python-dateutil==2.8.2
+pandas==2.3.3
+openpyxl==3.1.5  # For Excel export
+python-dateutil==2.9.0
 
 # Monitoring and Logging
-loguru==0.7.2
-prometheus-client==0.19.0
+loguru==0.7.3
+prometheus-client==0.23.1
 
 # Development and Testing
-pytest==7.4.3
-pytest-asyncio==0.21.1
-pytest-cov==4.1.0
-black==23.11.0
-isort==5.12.0
-flake8==6.1.0
-mypy==1.7.1
+pytest==8.4.2
+pytest-asyncio==1.2.0
+pytest-cov==7.0.0
+black==25.9.0
+isort==7.0.0
+flake8==7.3.0
+mypy==1.18.2
 
 # Environment and Configuration
-python-dotenv==1.0.0
-pyyaml==6.0.1
-click==8.1.7
+python-dotenv==1.1.1
+pyyaml==6.0.2
+click==8.3.0
 
 # Additional Utilities
-tqdm==4.66.1
-requests==2.31.0
-validators==0.22.0
+tqdm==4.67.1
+validators==0.35.0
