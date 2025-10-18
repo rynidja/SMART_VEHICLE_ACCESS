@@ -21,7 +21,7 @@ scipy==1.16.2
 # Machine Learning and Deep Learning
 torch==2.8.0
 torchvision==0.23.0
-ultralytics==8.0.196  # YOLOv8
+ultralytics==8.3.214  # YOLOv8
 onnxruntime==1.23.1
 #tensorrt==10.13.3.9  # Optional: for NVIDIA GPU acceleration
 
@@ -77,3 +77,8 @@ click==8.3.0
 # Additional Utilities
 tqdm==4.67.1
 validators==0.35.0
+
+# sort dependencies
+filterpy==1.4.5
+scikit-image==0.25.2
+lap==0.5.12

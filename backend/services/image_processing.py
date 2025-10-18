@@ -3,7 +3,6 @@
 
 import cv2
 import numpy as np
-from PIL import Image
 import torch
 from ultralytics import YOLO
 import easyocr
@@ -13,6 +12,8 @@ import logging
 from datetime import datetime
 import os
 import json
+from backend.services.sort.sort import *
+import re
 
 from backend.core.config import settings
 
@@ -27,6 +28,7 @@ class LicensePlateProcessor:
     def __init__(self):
         """Initialize the license plate processor with models and configurations."""
         self.detection_model = None
+        self.tracker = None
         self.ocr_reader = None
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         
@@ -45,13 +47,15 @@ class LicensePlateProcessor:
             # Load YOLO model for plate detection
             # In production, this should be a custom trained model for Algerian plates
             model_path = os.path.join(settings.MODELS_DIR, "yolo_plate_detection.pt")
-            
+
             if os.path.exists(model_path):
                 self.detection_model = YOLO(model_path)
             else:
                 # Use pre-trained YOLOv8 model as fallback
-                logger.warning("Custom plate detection model not found, using YOLOv8n")
-                self.detection_model = YOLO("yolov8n.pt")
+                logger.warning("Custom plate detection model not found")
+                raise Exception("yolo_plate_detection")
+
+            self.tracker = Sort()
             
             # Initialize EasyOCR reader for Arabic and Latin characters
             # Supports Arabic (ar) and English (en) for Algerian plates
@@ -91,11 +95,12 @@ class LicensePlateProcessor:
             blurred = cv2.GaussianBlur(denoised, (3, 3), 0)
             
             return blurred
-            
+
         except Exception as e:
             logger.error(f"Error preprocessing image: {e}")
             return image
-    
+
+
     def detect_license_plates(self, image: np.ndarray) -> List[Dict[str, Any]]:
         """
         Detect license plates in the image using YOLO.
@@ -108,30 +113,44 @@ class LicensePlateProcessor:
         """
         try:
             # Preprocess image
-            processed_image = self.preprocess_image(image)
+            # processed_image = self.preprocess_image(image)
+            processed_image = image
             
             # Run YOLO detection
-            results = self.detection_model(processed_image, conf=self.detection_confidence)
-            
+            license_plate_detections = self.detection_model(processed_image, conf=self.detection_confidence)[0]
+
+            # detect license plates
+            license_plates = []
+            for box in license_plate_detections.boxes:
+                x1, y1, x2, y2 = map(int, box.xyxy[0].cpu().numpy())
+                confidence = box.conf[0].cpu().numpy()
+
+                license_plates.append([x1, y1, x2, y2, confidence])
+
             detections = []
-            for result in results:
-                boxes = result.boxes
-                if boxes is not None:
-                    for box in boxes:
-                        # Extract bounding box coordinates
-                        x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-                        confidence = box.conf[0].cpu().numpy()
-                        
-                        # Convert to integers
-                        x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
-                        
-                        detections.append({
-                            'bbox': (x1, y1, x2, y2),
-                            'confidence': float(confidence),
-                            'width': x2 - x1,
-                            'height': y2 - y1
+
+            if len(license_plates) > 0:
+                tracked_plates = self.tracker.update(np.asarray(license_plates))
+
+                for license_plate in tracked_plates:
+                    x1, y1, x2, y2, id = license_plate
+                    ious = [
+                        max(0, min(x2, dx2) - max(x1, dx1)) *
+                        max(0, min(y2, dy2) - max(y1, dy1)) /
+                        ((x2 - x1)*(y2 - y1) + (dx2 - dx1)*(dy2 - dy1) -
+                         max(0, min(x2, dx2) - max(x1, dx1)) *
+                         max(0, min(y2, dy2) - max(y1, dy1)) + 1e-6)
+                        for dx1, dy1, dx2, dy2, _ in license_plates
+                    ]
+                    confidence = license_plates[np.argmax(ious)][4] if len(ious) else 0.0
+
+                    detections.append({
+                        'id': id,
+                        'bbox': tuple(map(int, (x1, y1, x2, y2))),
+                        'confidence': float(confidence),
+                        'width': x2 - x1,
+                        'height': y2 - y1
                         })
-            
             logger.info(f"Detected {len(detections)} license plates")
             return detections
             
@@ -192,26 +211,35 @@ class LicensePlateProcessor:
                 gray = cv2.cvtColor(plate_image, cv2.COLOR_BGR2GRAY)
             else:
                 gray = plate_image.copy()
-            
-            # Apply adaptive thresholding
-            thresh = cv2.adaptiveThreshold(
-                gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
+
+            thresh =  cv2.adaptiveThreshold(
+                gray, 255,
+                cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                cv2.THRESH_BINARY,
+                35, 2
             )
-            
+
             # Morphological operations to clean up the image
-            kernel = np.ones((2, 2), np.uint8)
+            kernel = np.ones((3, 3), np.uint8)
             cleaned = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
-            
+
             # Apply median filter to reduce noise
             filtered = cv2.medianBlur(cleaned, 3)
-            
+
+            # TODO: deskew plate
+
+            cv2.imshow("plate", filtered)
             return filtered
-            
+
         except Exception as e:
             logger.error(f"Error enhancing plate image: {e}")
             return plate_image
+
+    def _validate_plate_text(self, text: str) -> bool:
+        pattern = re.compile(r'^\d{10,11}$')
+        return bool(pattern.match(text))
     
-    def recognize_plate_text(self, plate_image: np.ndarray) -> Dict[str, Any]:
+    def recognize_plate_text(self, plate_image: np.ndarray, track_id: int) -> Dict[str, Any]:
         """
         Recognize text from license plate image using OCR.
         
@@ -227,38 +255,40 @@ class LicensePlateProcessor:
             
             # Try EasyOCR first (better for Arabic characters)
             easyocr_results = self.ocr_reader.readtext(enhanced_image)
-            
+
             # Process EasyOCR results
             if easyocr_results:
                 # Get the result with highest confidence
                 best_result = max(easyocr_results, key=lambda x: x[2])
                 text, confidence = best_result[1], best_result[2]
-                
+
                 # Clean and normalize text
                 cleaned_text = self._clean_plate_text(text)
-                
-                if confidence >= self.ocr_confidence_threshold:
+
+                if confidence >= self.ocr_confidence_threshold and self._validate_plate_text(cleaned_text):
                     return {
                         'text': cleaned_text,
                         'confidence': confidence,
                         'method': 'easyocr',
                         'raw_text': text
                     }
-            
+
             # Fallback to Tesseract OCR
             tesseract_text = pytesseract.image_to_string(
                 enhanced_image, 
                 config='--psm 8 -c tessedit_char_whitelist=0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'
             ).strip()
-            
+
             if tesseract_text:
                 cleaned_text = self._clean_plate_text(tesseract_text)
-                return {
-                    'text': cleaned_text,
-                    'confidence': 0.7,  # Default confidence for Tesseract
-                    'method': 'tesseract',
-                    'raw_text': tesseract_text
-                }
+
+                if self._validate_plate_text(tesseract_text):
+                    return {
+                        'text': cleaned_text,
+                        'confidence': self.ocr_confidence_threshold - 0.1,
+                        'method': 'tesseract',
+                        'raw_text': tesseract_text
+                    }
             
             return {
                 'text': '',
@@ -291,23 +321,25 @@ class LicensePlateProcessor:
             # Remove extra whitespace and convert to uppercase
             cleaned = text.strip().upper()
             
-            # Remove non-alphanumeric characters except spaces
-            cleaned = ''.join(c for c in cleaned if c.isalnum() or c.isspace())
-            
-            # Remove extra spaces
-            cleaned = ' '.join(cleaned.split())
-            
             # Common character corrections for Algerian plates
             corrections = {
                 'O': '0',  # Letter O to number 0
                 'I': '1',  # Letter I to number 1
                 'S': '5',  # Letter S to number 5
                 'B': '8',  # Letter B to number 8
+                'G': '6',
+                '|': '1',
+                ']': '1',
+                'J': '3',
+                'A': '4'
             }
             
             # Apply corrections
             for old, new in corrections.items():
                 cleaned = cleaned.replace(old, new)
+
+            cleaned = ''.join(c for c in cleaned if c.isalnum())
+            # cleaned = ' '.join(cleaned.split())
             
             return cleaned
             
@@ -337,7 +369,9 @@ class LicensePlateProcessor:
                 plate_roi = self.extract_plate_roi(image, detection['bbox'])
                 
                 # Recognize text
-                ocr_result = self.recognize_plate_text(plate_roi)
+                ocr_result = self.recognize_plate_text(plate_roi, detection['id'])
+
+                logger.info(f"LicensePlate: {ocr_result}")
                 
                 # Combine detection and OCR results
                 result = {
@@ -349,7 +383,8 @@ class LicensePlateProcessor:
                 
                 results.append(result)
             
-            logger.info(f"Processed {len(results)} plates in {results[0]['processing_time_ms']:.2f}ms")
+            if results:
+                logger.info(f"Processed {len(results)} plates in {results[0]['processing_time_ms']:.2f}ms")
             return results
             
         except Exception as e:
@@ -452,6 +487,27 @@ class VideoProcessor:
         except Exception as e:
             logger.error(f"Error reading frame: {e}")
             return None
+
+    def annotate_frame(self, frame: np.ndarray, results) -> np.ndarray:
+        annotated_frame = frame.copy()
+
+        for res in results:
+            detection = res['detection']
+            overall_confidence = float(res['overall_confidence'])
+
+            # TODO make color dynamic
+            color = (0, 255, 0)
+
+            x1, y1, x2, y2 = detection['bbox']
+            width, height = x2 - x1, y2 - y1
+            id = detection['id']
+
+            cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), color, 2)
+            label = f"{id}: {res['ocr']['text']} ({overall_confidence:.2f})"
+            cv2.putText( annotated_frame, label, (x1, max(y1 - 10, 20)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
+
+        return annotated_frame
+
     
     def process_video_stream(self, stream_url: str, callback=None) -> None:
         """
@@ -474,12 +530,14 @@ class VideoProcessor:
                 
                 # Process frame for license plates
                 results = self.plate_processor.process_image(frame)
+                annotated_frame = self.annotate_frame(frame, results)
                 
                 # Call callback if provided
                 if callback and results:
                     callback(results, frame, self.frame_count)
                 
                 # Break on 'q' key press (for testing)
+                cv2.imshow("frame", annotated_frame)
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     break
             

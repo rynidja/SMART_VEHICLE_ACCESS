@@ -49,7 +49,7 @@ class Settings(BaseSettings):
     
     # License Plate Detection Settings
     PLATE_DETECTION_CONFIDENCE: float = 0.6
-    OCR_CONFIDENCE_THRESHOLD: float = 0.85
+    OCR_CONFIDENCE_THRESHOLD: float = 0.45
     MAX_PLATE_LENGTH: int = 10
     MIN_PLATE_LENGTH: int = 4
     
