@@ -49,7 +49,7 @@ class LicensePlateProcessor:
             model_path = os.path.join(settings.MODELS_DIR, "yolo_plate_detection.pt")
 
             if os.path.exists(model_path):
-                self.detection_model = YOLO(model_path)
+                self.detection_model = YOLO(model_path).to(self.device)
             else:
                 # Use pre-trained YOLOv8 model as fallback
                 logger.warning("Custom plate detection model not found")
@@ -78,23 +78,18 @@ class LicensePlateProcessor:
             np.ndarray: Preprocessed image
         """
         try:
-            # Convert to grayscale if needed
-            if len(image.shape) == 3:
-                gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-            else:
-                gray = image.copy()
-            
-            # Apply CLAHE (Contrast Limited Adaptive Histogram Equalization)
-            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-            enhanced = clahe.apply(gray)
-            
-            # Denoise using bilateral filter
-            denoised = cv2.bilateralFilter(enhanced, 9, 75, 75)
-            
-            # Apply Gaussian blur to reduce noise
-            blurred = cv2.GaussianBlur(denoised, (3, 3), 0)
-            
-            return blurred
+            # Simple contrast + brightness normalization
+            enhanced = cv2.convertScaleAbs(image, alpha=1.3, beta=10)
+
+            # Light sharpening (cheap)
+            kernel = np.array([[0, -1, 0],
+                               [-1, 5, -1],
+                               [0, -1, 0]])
+            sharpened = cv2.filter2D(enhanced, -1, kernel)
+
+            final = cv2.GaussianBlur(sharpened, (3, 3), 0)
+
+            return final
 
         except Exception as e:
             logger.error(f"Error preprocessing image: {e}")
@@ -113,8 +108,7 @@ class LicensePlateProcessor:
         """
         try:
             # Preprocess image
-            # processed_image = self.preprocess_image(image)
-            processed_image = image
+            processed_image = self.preprocess_image(image)
             
             # Run YOLO detection
             license_plate_detections = self.detection_model(processed_image, conf=self.detection_confidence)[0]
@@ -134,19 +128,17 @@ class LicensePlateProcessor:
 
                 for license_plate in tracked_plates:
                     x1, y1, x2, y2, id = license_plate
+
                     ious = [
-                        max(0, min(x2, dx2) - max(x1, dx1)) *
-                        max(0, min(y2, dy2) - max(y1, dy1)) /
-                        ((x2 - x1)*(y2 - y1) + (dx2 - dx1)*(dy2 - dy1) -
-                         max(0, min(x2, dx2) - max(x1, dx1)) *
-                         max(0, min(y2, dy2) - max(y1, dy1)) + 1e-6)
-                        for dx1, dy1, dx2, dy2, _ in license_plates
+                        max(0, min(x2, px2) - max(x1, px1)) *
+                        max(0, min(y2, py2) - max(y1, py1))
+                        for px1, py1, px2, py2, _ in license_plates
                     ]
-                    confidence = license_plates[np.argmax(ious)][4] if len(ious) else 0.0
+                    confidence = license_plates[np.argmax(ious)][4] if ious else 0.0
 
                     detections.append({
                         'id': id,
-                        'bbox': tuple(map(int, (x1, y1, x2, y2))),
+                        'bbox': (int(x1), int(y1), int(x2), int(y2)),
                         'confidence': float(confidence),
                         'width': x2 - x1,
                         'height': y2 - y1
@@ -365,6 +357,8 @@ class LicensePlateProcessor:
             
             results = []
             for detection in detections:
+                plate_start_time = datetime.now()
+
                 # Extract plate ROI
                 plate_roi = self.extract_plate_roi(image, detection['bbox'])
                 
@@ -378,13 +372,14 @@ class LicensePlateProcessor:
                     'detection': detection,
                     'ocr': ocr_result,
                     'overall_confidence': (detection['confidence'] + ocr_result['confidence']) / 2,
-                    'processing_time_ms': (datetime.now() - start_time).total_seconds() * 1000
+                    'processing_time_ms': (datetime.now() - plate_start_time).total_seconds() * 1000
                 }
                 
                 results.append(result)
             
             if results:
-                logger.info(f"Processed {len(results)} plates in {results[0]['processing_time_ms']:.2f}ms")
+                processing_time = (datetime.now() - start_time).total_seconds() * 1000
+                logger.info(f"Processed {len(results)} plates in {processing_time:.2f}ms")
             return results
             
         except Exception as e:
