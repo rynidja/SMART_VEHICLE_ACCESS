@@ -5,13 +5,11 @@ import cv2
 import numpy as np
 import torch
 from ultralytics import YOLO
-import easyocr
-import pytesseract
+from paddleocr import PaddleOCR, TextRecognition
 from typing import List, Tuple, Optional, Dict, Any
 import logging
 from datetime import datetime
 import os
-import json
 from backend.services.sort.sort import *
 import re
 
@@ -30,6 +28,7 @@ class LicensePlateProcessor:
         self.detection_model = None
         self.tracker = None
         self.ocr_reader = None
+        self.history = {} # TODO use a real solution
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         
         # Load models
@@ -57,9 +56,10 @@ class LicensePlateProcessor:
 
             self.tracker = Sort()
             
-            # Initialize EasyOCR reader for Arabic and Latin characters
-            # Supports Arabic (ar) and English (en) for Algerian plates
-            self.ocr_reader = easyocr.Reader(['en', 'ar'], gpu=torch.cuda.is_available())
+            self.ocr_reader = TextRecognition(
+                model_name="PP-OCRv5_mobile_rec",
+                device='gpu' if torch.cuda.is_available() else 'cpu',
+            )
             
             logger.info("Models loaded successfully")
             
@@ -204,24 +204,35 @@ class LicensePlateProcessor:
             else:
                 gray = plate_image.copy()
 
-            thresh =  cv2.adaptiveThreshold(
-                gray, 255,
-                cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                cv2.THRESH_BINARY,
-                35, 2
-            )
+            gray = cv2.bilateralFilter(gray, 11, 17, 17)
+
+            # Deskew the image
+            edges = cv2.Canny(gray, 100, 200)
+            lines = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=40,
+                                    minLineLength=30, maxLineGap=100)
+
+            if lines is not None and len(lines) > 0:
+                angles = []
+                for line in lines:
+                    x1, y1, x2, y2 = line[0]
+                    angle_rad = np.arctan2(y2 - y1, x2 - x1)
+                    angle_deg = np.degrees(angle_rad)
+                    if -80 < angle_deg < 80:
+                        angles.append(angle_deg)
+
+                (h, w) = plate_image.shape[:2]
+                center = (w // 2, h // 2)
+                angle = float(angles[0])
+
+                rotation_matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
+                plate_image = cv2.warpAffine(plate_image, rotation_matrix, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
 
             # Morphological operations to clean up the image
-            kernel = np.ones((3, 3), np.uint8)
-            cleaned = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+            kernel = np.ones((2, 2), np.uint8)
+            cleaned = cv2.morphologyEx(plate_image, cv2.MORPH_CLOSE, kernel)
 
-            # Apply median filter to reduce noise
-            filtered = cv2.medianBlur(cleaned, 3)
-
-            # TODO: deskew plate
-
-            cv2.imshow("plate", filtered)
-            return filtered
+            cv2.imshow("plate", cleaned)
+            return cleaned
 
         except Exception as e:
             logger.error(f"Error enhancing plate image: {e}")
@@ -245,43 +256,35 @@ class LicensePlateProcessor:
             # Enhance the plate image
             enhanced_image = self.enhance_plate_image(plate_image)
             
-            # Try EasyOCR first (better for Arabic characters)
-            easyocr_results = self.ocr_reader.readtext(enhanced_image)
+            paddleocr_results = self.ocr_reader.predict(enhanced_image, batch_size=1)
 
-            # Process EasyOCR results
-            if easyocr_results:
-                # Get the result with highest confidence
-                best_result = max(easyocr_results, key=lambda x: x[2])
-                text, confidence = best_result[1], best_result[2]
+            if len(paddleocr_results) > 0:
+                text = paddleocr_results[0].get('rec_text') or ""
+                confidence = paddleocr_results[0].get('rec_score') or 0
 
-                # Clean and normalize text
                 cleaned_text = self._clean_plate_text(text)
 
                 if confidence >= self.ocr_confidence_threshold and self._validate_plate_text(cleaned_text):
+                    prev = self.history.get(track_id)
+                    if not prev or prev[1] <= confidence:
+                        self.history[track_id] = (cleaned_text, confidence)
+
                     return {
                         'text': cleaned_text,
                         'confidence': confidence,
-                        'method': 'easyocr',
+                        'method': 'paddleocr',
                         'raw_text': text
                     }
 
-            # Fallback to Tesseract OCR
-            tesseract_text = pytesseract.image_to_string(
-                enhanced_image, 
-                config='--psm 8 -c tessedit_char_whitelist=0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'
-            ).strip()
+            prev = self.history.get(track_id)
+            if prev:
+                return {
+                    'text': prev[0],
+                    'confidence': prev[1],
+                    'method': 'history',
+                    'raw_text': ''
+                }
 
-            if tesseract_text:
-                cleaned_text = self._clean_plate_text(tesseract_text)
-
-                if self._validate_plate_text(tesseract_text):
-                    return {
-                        'text': cleaned_text,
-                        'confidence': self.ocr_confidence_threshold - 0.1,
-                        'method': 'tesseract',
-                        'raw_text': tesseract_text
-                    }
-            
             return {
                 'text': '',
                 'confidence': 0.0,
