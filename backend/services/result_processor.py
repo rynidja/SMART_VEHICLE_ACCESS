@@ -25,13 +25,11 @@ class ResultProcessor:
     async def gen_frames(self, camera_id):
         try:
             while True:
-                frame = self._frames.get(camera_id, None)
-                if frame:
+                frame = self._frames.get(camera_id)
+                if frame is not None:
                     yield (b'--frame\r\n'
                            b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
-                else:
-                    break
-                await asyncio.sleep(0)
+                await asyncio.sleep(0.03) # for ~30 fps
         except:
             pass
 

@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     DEFAULT_FPS: int = 25
     FRAME_BUFFER_SIZE: int = 100
     RTSP_TIMEOUT: int = 30
+    FRAME_SKIP: int = 4  # Process every 2nd frame to reduce load
     
     # Security & Privacy Settings
     PLATE_HASH_SALT: str = "your-plate-hash-salt-change-in-production"

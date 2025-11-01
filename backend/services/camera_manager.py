@@ -1,6 +1,12 @@
 import asyncio
 import cv2
+import time
 from backend.services.worker_pool import worker_pool
+from backend.core.config import settings
+import logging
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 class CameraManager:
     def __init__(self):
@@ -44,7 +50,6 @@ class CameraManager:
         cap = cv2.VideoCapture(stream_url)
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         
-        frame_skip = 2  # Process every 2nd frame to reduce load
         frame_count = 0
         
         while self.camera_pool.get(camera_id, {}).get('active', False):
@@ -54,7 +59,7 @@ class CameraManager:
                 continue
             
             frame_count += 1
-            if frame_count % frame_skip != 0:
+            if frame_count % settings.FRAME_SKIP != 0:
                 continue
             
             submitted = worker_pool.submit_frame(
@@ -66,7 +71,7 @@ class CameraManager:
             if not submitted:
                 logger.warning(f"Camera {camera_id}: worker queue full, skipping frame")
             
-            await asyncio.sleep(0.001)  # Yield control
+            await asyncio.sleep(0.03)  # Yield control
         
         cap.release()
         logger.info(f"Camera {camera_id} capture stopped")

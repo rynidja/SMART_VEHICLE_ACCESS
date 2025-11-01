@@ -2,6 +2,7 @@
 # Handles camera configuration, status monitoring, and stream management
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 from typing import List, Optional
@@ -570,7 +571,7 @@ async def get_camera(
 
         return StreamingResponse(
             result_processor.gen_frames(camera_id),
-            media_type='multipart/x-mixed-replace; boudary=frame'
+            media_type='multipart/x-mixed-replace; boundary=frame'
         )
 
     except HTTPException:

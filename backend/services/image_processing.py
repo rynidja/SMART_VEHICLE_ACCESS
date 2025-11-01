@@ -330,12 +330,11 @@ class LicensePlateProcessor:
             logger.error(f"Error saving plate thumbnail: {e}")
             return ""
 
-    def annotate_frame(self, frame: np.ndarray, results) -> np.ndarray:
+    def annotate_frame(self, frame: np.ndarray, detections) -> np.ndarray:
         annotated_frame = frame.copy()
 
-        for res in results:
-            detection = res['detection']
-            overall_confidence = float(res['overall_confidence'])
+        for detection in detections:
+            overall_confidence = float(detection['overall_confidence'])
 
             # TODO make color dynamic
             color = (0, 255, 0)
@@ -345,7 +344,7 @@ class LicensePlateProcessor:
             id = detection['id']
 
             cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), color, 2)
-            label = f"{id}: {res['ocr']['text']} ({overall_confidence:.2f})"
+            label = f"{id}: {detection['ocr']['text']} ({overall_confidence:.2f})"
             cv2.putText( annotated_frame, label, (x1, max(y1 - 10, 20)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
 
         return annotated_frame

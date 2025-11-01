@@ -4,8 +4,10 @@ import logging
 from queue import Empty
 import numpy as np
 import torch
+import cv2
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 def model_worker(
     worker_id: int,
@@ -25,8 +27,8 @@ def model_worker(
     while True:
         try:
             task = input_queue.get(timeout=1)
-            if task is None:  # Poison pill for shutdown
-                break
+            if task is None:
+                continue
             
             camera_id = task['camera_id']
             frame = task['frame']
@@ -91,7 +93,7 @@ class WorkerPool:
     
     def __init__(self, num_workers: int = 1):
         self.num_workers = num_workers
-        self.input_queue = mp.Queue(maxsize=50)
+        self.input_queues = [mp.Queue(maxsize=100) for _ in range(self.num_workers)]
         self.output_queue = mp.Queue()
         self.workers: List[Process] = []
     
@@ -100,7 +102,7 @@ class WorkerPool:
         for i in range(self.num_workers):
             worker = Process(
                 target=model_worker,
-                args=(i, self.input_queue, self.output_queue)
+                args=(i, self.input_queues[i], self.output_queue)
             )
             worker.daemon = True
             worker.start()
@@ -112,7 +114,7 @@ class WorkerPool:
         """Submit frame for processing (non-blocking)"""
         worker_id = camera_id % self.num_workers # just to avoid sharing the tracker
         try:
-            self.input_queue[worker_id].put_nowait({
+            self.input_queues[worker_id].put_nowait({
                 'camera_id': camera_id,
                 'frame': frame,
                 'timestamp': timestamp,
@@ -130,15 +132,13 @@ class WorkerPool:
     
     def shutdown(self):
         """Gracefully shutdown workers"""
-        for _ in self.workers:
-            self.input_queue.put(None)  # Poison pill
-        
         for worker in self.workers:
             worker.join(timeout=5)
             if worker.is_alive():
                 worker.terminate()
 
-        self.input_queue.close()
+        for i in range(self.num_workers):
+            self.input_queues[i].close()
         self.output_queue.close()
         
         logger.info("Worker pool shutdown complete")
