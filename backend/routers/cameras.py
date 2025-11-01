@@ -14,9 +14,12 @@ from backend.core.security import verify_token, check_permission, UserRole
 from backend.schemas.camera import (
     CameraCreate, CameraUpdate, CameraResponse, CameraStatsResponse
 )
+from backend.services.camera_manager import camera_manager
+from backend.services.result_processor import result_processor
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
 
 @router.post("/", response_model=CameraResponse)
 async def create_camera(
@@ -349,6 +352,11 @@ async def start_camera(
                 detail="Camera is disabled"
             )
         
+        if camera_manager.is_camera_active(camera_id):
+            return {"message": "Camera already running"}
+        
+        await camera_manager.start_camera(camera_id, camera.stream_url)
+
         # Update camera status
         camera.status = CameraStatus.ACTIVE
         camera.updated_at = datetime.utcnow()
@@ -403,7 +411,12 @@ async def stop_camera(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Camera not found"
             )
+
+        if not camera_manager.is_camera_active(camera_id):
+            return {"message": "Camera already stopped"}
         
+        camera_manager.stop_camera(camera_id)
+
         # Update camera status
         camera.status = CameraStatus.INACTIVE
         camera.updated_at = datetime.utcnow()
@@ -529,4 +542,42 @@ async def get_camera_health(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to check camera health"
+        )
+
+@router.get("/{camera_id}/feed")
+async def get_camera(
+    camera_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: dict = Depends(verify_token)
+):
+    try:
+        result = await db.execute(
+            select(Camera).where(Camera.id == camera_id)
+        )
+        camera = result.scalar_one_or_none()
+
+        if not camera:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Camera not found"
+            )
+
+        if not camera.is_enabled or not camera_manager.is_camera_active(camera_id):
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Camera not running"
+            )
+
+        return StreamingResponse(
+            result_processor.gen_frames(camera_id),
+            media_type='multipart/x-mixed-replace; boudary=frame'
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching camera {camera_id} feed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to fetch camera feed"
         )

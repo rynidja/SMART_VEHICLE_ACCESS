@@ -3,7 +3,6 @@
 
 from fastapi import FastAPI, HTTPException, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from contextlib import asynccontextmanager
 import uvicorn
 import logging
@@ -12,14 +11,14 @@ from loguru import logger
 from backend.database import init_db
 from backend.routers import plates, cameras, dashboard, auth
 from backend.core.config import settings
-from backend.core.security import verify_token
+from backend.services.worker_pool import worker_pool
+from backend.services.camera_manager import camera_manager
+from backend.services.result_processor import result_processor
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger.add("logs/app.log", rotation="1 day", retention="30 days")
 
-# Security scheme
-security = HTTPBearer()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -31,11 +30,19 @@ async def lifespan(app: FastAPI):
     logger.info("Starting Smart Vehicle License Scanner API...")
     await init_db()
     logger.info("Database initialized successfully")
+
+    worker_pool.start()
+    await result_processor.start()
     
     yield
     
     # Shutdown
     logger.info("Shutting down Smart Vehicle License Scanner API...")
+
+    await camera_manager.shutdown()
+    await result_processor.shutdown()
+
+    worker_pool.shutdown()
 
 # Create FastAPI application
 app = FastAPI(

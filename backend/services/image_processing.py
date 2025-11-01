@@ -1,16 +1,15 @@
-# Image processing and OCR pipeline for license plate recognition
+# Image processing and OCR for license plate recognition
 # Handles plate detection, character recognition, and image preprocessing
 
 import cv2
 import numpy as np
 import torch
 from ultralytics import YOLO
-from paddleocr import PaddleOCR, TextRecognition
+from paddleocr import TextRecognition
 from typing import List, Tuple, Optional, Dict, Any
 import logging
 from datetime import datetime
 import os
-from backend.services.sort.sort import *
 import re
 
 from backend.core.config import settings
@@ -26,9 +25,7 @@ class LicensePlateProcessor:
     def __init__(self):
         """Initialize the license plate processor with models and configurations."""
         self.detection_model = None
-        self.tracker = None
         self.ocr_reader = None
-        self.history = {} # TODO use a real solution
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         
         # Load models
@@ -37,8 +34,6 @@ class LicensePlateProcessor:
         # Processing parameters
         self.detection_confidence = settings.PLATE_DETECTION_CONFIDENCE
         self.ocr_confidence_threshold = settings.OCR_CONFIDENCE_THRESHOLD
-        
-        logger.info(f"LicensePlateProcessor initialized on device: {self.device}")
     
     def _load_models(self):
         """Load YOLO detection model and OCR reader."""
@@ -54,8 +49,6 @@ class LicensePlateProcessor:
                 logger.warning("Custom plate detection model not found")
                 raise Exception("yolo_plate_detection")
 
-            self.tracker = Sort()
-            
             self.ocr_reader = TextRecognition(
                 model_name="PP-OCRv5_mobile_rec",
                 device='gpu' if torch.cuda.is_available() else 'cpu',
@@ -121,30 +114,7 @@ class LicensePlateProcessor:
 
                 license_plates.append([x1, y1, x2, y2, confidence])
 
-            detections = []
-
-            if len(license_plates) > 0:
-                tracked_plates = self.tracker.update(np.asarray(license_plates))
-
-                for license_plate in tracked_plates:
-                    x1, y1, x2, y2, id = license_plate
-
-                    ious = [
-                        max(0, min(x2, px2) - max(x1, px1)) *
-                        max(0, min(y2, py2) - max(y1, py1))
-                        for px1, py1, px2, py2, _ in license_plates
-                    ]
-                    confidence = license_plates[np.argmax(ious)][4] if ious else 0.0
-
-                    detections.append({
-                        'id': id,
-                        'bbox': (int(x1), int(y1), int(x2), int(y2)),
-                        'confidence': float(confidence),
-                        'width': x2 - x1,
-                        'height': y2 - y1
-                        })
-            logger.info(f"Detected {len(detections)} license plates")
-            return detections
+            return np.asarray(license_plates) if license_plates else np.empty((0, 5))
             
         except Exception as e:
             logger.error(f"Error detecting license plates: {e}")
@@ -222,7 +192,8 @@ class LicensePlateProcessor:
 
                 (h, w) = plate_image.shape[:2]
                 center = (w // 2, h // 2)
-                angle = float(angles[0])
+                # angle = float(angles[0])
+                angle = float(np.mean(angles))
 
                 rotation_matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
                 plate_image = cv2.warpAffine(plate_image, rotation_matrix, (w, h), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
@@ -231,7 +202,6 @@ class LicensePlateProcessor:
             kernel = np.ones((2, 2), np.uint8)
             cleaned = cv2.morphologyEx(plate_image, cv2.MORPH_CLOSE, kernel)
 
-            cv2.imshow("plate", cleaned)
             return cleaned
 
         except Exception as e:
@@ -265,25 +235,12 @@ class LicensePlateProcessor:
                 cleaned_text = self._clean_plate_text(text)
 
                 if confidence >= self.ocr_confidence_threshold and self._validate_plate_text(cleaned_text):
-                    prev = self.history.get(track_id)
-                    if not prev or prev[1] <= confidence:
-                        self.history[track_id] = (cleaned_text, confidence)
-
                     return {
                         'text': cleaned_text,
                         'confidence': confidence,
                         'method': 'paddleocr',
                         'raw_text': text
                     }
-
-            prev = self.history.get(track_id)
-            if prev:
-                return {
-                    'text': prev[0],
-                    'confidence': prev[1],
-                    'method': 'history',
-                    'raw_text': ''
-                }
 
             return {
                 'text': '',
@@ -342,53 +299,6 @@ class LicensePlateProcessor:
             logger.error(f"Error cleaning plate text: {e}")
             return text
     
-    def process_image(self, image: np.ndarray) -> List[Dict[str, Any]]:
-        """
-        Complete pipeline: detect plates and recognize text.
-        
-        Args:
-            image: Input image as numpy array
-            
-        Returns:
-            List[Dict]: List of processed plate detections with text recognition
-        """
-        try:
-            start_time = datetime.now()
-            
-            # Detect license plates
-            detections = self.detect_license_plates(image)
-            
-            results = []
-            for detection in detections:
-                plate_start_time = datetime.now()
-
-                # Extract plate ROI
-                plate_roi = self.extract_plate_roi(image, detection['bbox'])
-                
-                # Recognize text
-                ocr_result = self.recognize_plate_text(plate_roi, detection['id'])
-
-                logger.info(f"LicensePlate: {ocr_result}")
-                
-                # Combine detection and OCR results
-                result = {
-                    'detection': detection,
-                    'ocr': ocr_result,
-                    'overall_confidence': (detection['confidence'] + ocr_result['confidence']) / 2,
-                    'processing_time_ms': (datetime.now() - plate_start_time).total_seconds() * 1000
-                }
-                
-                results.append(result)
-            
-            if results:
-                processing_time = (datetime.now() - start_time).total_seconds() * 1000
-                logger.info(f"Processed {len(results)} plates in {processing_time:.2f}ms")
-            return results
-            
-        except Exception as e:
-            logger.error(f"Error processing image: {e}")
-            return []
-    
     def save_plate_thumbnail(self, plate_image: np.ndarray, detection_id: str) -> str:
         """
         Save plate thumbnail for audit purposes.
@@ -420,72 +330,6 @@ class LicensePlateProcessor:
             logger.error(f"Error saving plate thumbnail: {e}")
             return ""
 
-class VideoProcessor:
-    """
-    Video processing class for handling video streams and files.
-    Supports RTSP streams, video files, and real-time processing.
-    """
-    
-    def __init__(self, plate_processor: LicensePlateProcessor):
-        """
-        Initialize video processor.
-        
-        Args:
-            plate_processor: LicensePlateProcessor instance
-        """
-        self.plate_processor = plate_processor
-        self.cap = None
-        self.frame_count = 0
-        
-    def open_stream(self, stream_url: str) -> bool:
-        """
-        Open video stream (RTSP, HTTP, or file).
-        
-        Args:
-            stream_url: URL or path to video stream
-            
-        Returns:
-            bool: True if stream opened successfully
-        """
-        try:
-            self.cap = cv2.VideoCapture(stream_url)
-            
-            if not self.cap.isOpened():
-                logger.error(f"Failed to open stream: {stream_url}")
-                return False
-            
-            # Set buffer size to reduce latency
-            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            
-            logger.info(f"Successfully opened stream: {stream_url}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error opening stream: {e}")
-            return False
-    
-    def read_frame(self) -> Optional[np.ndarray]:
-        """
-        Read next frame from video stream.
-        
-        Returns:
-            np.ndarray: Frame data or None if no frame available
-        """
-        try:
-            if self.cap is None:
-                return None
-            
-            ret, frame = self.cap.read()
-            if ret:
-                self.frame_count += 1
-                return frame
-            else:
-                return None
-                
-        except Exception as e:
-            logger.error(f"Error reading frame: {e}")
-            return None
-
     def annotate_frame(self, frame: np.ndarray, results) -> np.ndarray:
         annotated_frame = frame.copy()
 
@@ -505,66 +349,3 @@ class VideoProcessor:
             cv2.putText( annotated_frame, label, (x1, max(y1 - 10, 20)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
 
         return annotated_frame
-
-    
-    def process_video_stream(self, stream_url: str, callback=None) -> None:
-        """
-        Process video stream continuously.
-        
-        Args:
-            stream_url: URL or path to video stream
-            callback: Optional callback function for processing results
-        """
-        try:
-            if not self.open_stream(stream_url):
-                return
-            
-            logger.info(f"Starting video stream processing: {stream_url}")
-            
-            while True:
-                frame = self.read_frame()
-                if frame is None:
-                    break
-                
-                # Process frame for license plates
-                results = self.plate_processor.process_image(frame)
-                annotated_frame = self.annotate_frame(frame, results)
-                
-                # Call callback if provided
-                if callback and results:
-                    callback(results, frame, self.frame_count)
-                
-                # Break on 'q' key press (for testing)
-                cv2.imshow("frame", annotated_frame)
-                if cv2.waitKey(1) & 0xFF == ord('q'):
-                    break
-            
-        except Exception as e:
-            logger.error(f"Error processing video stream: {e}")
-        finally:
-            self.close_stream()
-    
-    def close_stream(self):
-        """Close video stream."""
-        if self.cap:
-            self.cap.release()
-            cv2.destroyAllWindows()
-            logger.info("Video stream closed")
-    
-    def get_stream_info(self) -> Dict[str, Any]:
-        """
-        Get video stream information.
-        
-        Returns:
-            Dict: Stream properties
-        """
-        if self.cap is None:
-            return {}
-        
-        return {
-            'width': int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
-            'height': int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
-            'fps': self.cap.get(cv2.CAP_PROP_FPS),
-            'frame_count': self.frame_count,
-            'is_opened': self.cap.isOpened()
-        }
