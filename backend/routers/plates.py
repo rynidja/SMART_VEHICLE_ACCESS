@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 import logging
 
 from backend.database import get_async_db
-from backend.models.database import LicensePlate, LicensePlateDetection, PlateStatus
+from backend.models import LicensePlate, LicensePlateDetection, PlateStatus
 from backend.core.security import verify_token, hash_license_plate, verify_license_plate_hash
 from backend.schemas.plate import (
     PlateCreate, PlateUpdate, PlateResponse, PlateDetectionResponse,

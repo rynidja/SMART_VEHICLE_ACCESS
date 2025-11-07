@@ -2,7 +2,7 @@
 # Core Framework and API
 fastapi==0.119.0
 uvicorn[standard]==0.37.0
-pydantic==2.12.2
+pydantic[email]==2.12.2
 pydantic-settings==2.11.0
 
 # Database and ORM
@@ -38,6 +38,7 @@ ffmpeg-python==0.2.0
 
 # Security and Cryptography
 cryptography==46.0.2
+bcrypt==4.0.1
 passlib[bcrypt]==1.7.4
 python-jose[cryptography]==3.5.0
 python-multipart==0.0.20

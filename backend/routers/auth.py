@@ -9,12 +9,12 @@ from datetime import datetime, timedelta
 import logging
 
 from backend.database import get_async_db
-from backend.models.database import User
+from backend.models import User
 from backend.core.security import (
     verify_password, get_password_hash, create_access_token, 
-    verify_token, UserRole, check_permission
+    verify_token, check_permission
 )
-from backend.schemas.auth import Token, LoginRequest, UserCreate, UserResponse, UserUpdate
+from backend.schemas.auth import Token, LoginRequest, UserCreate, UserResponse, UserUpdate, UserRole
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -63,7 +63,7 @@ async def login(
         # Create access token
         access_token_expires = timedelta(minutes=30)
         access_token = create_access_token(
-            data={"sub": user.username, "user_id": user.id, "role": user.role.value},
+            data={"sub": user.username, "user_id": user.id, "role": user.role},
             expires_delta=access_token_expires
         )
         
@@ -322,6 +322,7 @@ async def get_users(
             detail="Failed to fetch users"
         )
 
+# TODO: add jwt black list
 @router.post("/logout")
 async def logout(current_user: dict = Depends(verify_token)):
     """

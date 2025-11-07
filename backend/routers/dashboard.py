@@ -9,14 +9,13 @@ from datetime import datetime, timedelta
 import logging
 
 from backend.database import get_async_db
-from backend.models.database import (
+from backend.models import (
     Camera, LicensePlate, LicensePlateDetection, 
     CameraStatus, PlateStatus, AuditLog
 )
 from backend.core.security import verify_token
-from backend.schemas.dashboard import (
-    DashboardStats, SystemHealth, RecentDetectionResponse
-)
+from backend.schemas.plate import PlateDetectionResponse
+from backend.schemas.dashboard import DashboardStats, SystemHealth 
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -183,7 +182,7 @@ async def get_system_health(
             detail="Failed to check system health"
         )
 
-@router.get("/recent-detections", response_model=List[RecentDetectionResponse])
+@router.get("/recent-detections", response_model=List[PlateDetectionResponse])
 async def get_recent_detections(
     limit: int = 50,
     hours: int = 24,
@@ -200,7 +199,7 @@ async def get_recent_detections(
         current_user: Current authenticated user
         
     Returns:
-        List[RecentDetectionResponse]: Recent detections
+        List[PlateDetectionResponse]: Recent detections
     """
     try:
         since_time = datetime.utcnow() - timedelta(hours=hours)
@@ -220,7 +219,7 @@ async def get_recent_detections(
         # Convert to response format
         recent_detections = []
         for detection, camera_name in detections:
-            recent_detections.append(RecentDetectionResponse(
+            recent_detections.append(PlateDetectionResponse(
                 id=detection.id,
                 detected_plate_text=detection.detected_plate_text,
                 camera_name=camera_name,

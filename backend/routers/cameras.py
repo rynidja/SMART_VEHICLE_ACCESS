@@ -10,8 +10,9 @@ from datetime import datetime
 import logging
 
 from backend.database import get_async_db
-from backend.models.database import Camera, CameraStatus
-from backend.core.security import verify_token, check_permission, UserRole
+from backend.models import Camera, CameraStatus
+from backend.core.security import verify_token, check_permission
+from backend.schemas.auth import UserRole
 from backend.schemas.camera import (
     CameraCreate, CameraUpdate, CameraResponse, CameraStatsResponse
 )
@@ -356,6 +357,7 @@ async def start_camera(
         if camera_manager.is_camera_active(camera_id):
             return {"message": "Camera already running"}
         
+        # TODO: add roi extraction
         await camera_manager.start_camera(camera_id, camera.stream_url)
 
         # Update camera status

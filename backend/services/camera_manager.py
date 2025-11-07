@@ -76,8 +76,5 @@ class CameraManager:
         cap.release()
         logger.info(f"Camera {camera_id} capture stopped")
 
-    def gen_frames(self, camera_id: int):
-        pass
-
 
 camera_manager = CameraManager()
