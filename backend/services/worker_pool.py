@@ -5,6 +5,7 @@ from queue import Empty
 import numpy as np
 import torch
 import cv2
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -34,6 +35,8 @@ def model_worker(
             frame = task['frame']
             timestamp = task['timestamp']
             
+            start_time = datetime.now()
+
             tracker = tracker_manager.get_tracker(camera_id)
             
             license_plates = processor.detect_license_plates(frame)
@@ -44,6 +47,7 @@ def model_worker(
                 tracked_plates = tracker.update(license_plates)
                 
                 for plate in tracked_plates:
+                    plate_start_time = datetime.now()
                     x1, y1, x2, y2, track_id = plate
                     
                     ious = [
@@ -57,13 +61,13 @@ def model_worker(
                     plate_roi = processor.extract_plate_roi(frame, bbox)
                     ocr_result = processor.recognize_plate_text(plate_roi, int(track_id))
                     
-                    if ocr_result['text']:
-                        detections.append({
-                            'id': int(track_id),
-                            'bbox': bbox,
-                            'confidence': float(confidence),
-                            'ocr': ocr_result,
-                            'overall_confidence': (confidence + ocr_result['confidence']) / 2
+                    detections.append({
+                        'id': int(track_id),
+                        'bbox': bbox,
+                        'confidence': float(confidence),
+                        'ocr': ocr_result,
+                        'overall_confidence': (confidence + ocr_result['confidence']) / 2,
+                        'processing_time_ms': (datetime.now() - plate_start_time).total_seconds() * 1000
                         })
             
             annotated_frame = processor.annotate_frame(frame, detections)
@@ -79,6 +83,9 @@ def model_worker(
                 'detections': detections,
                 'worker_id': worker_id
             })
+
+            processing_time = (datetime.now() - start_time).total_seconds() * 1000
+            logger.info(f"Processed frame with {len(detections)} plates in {processing_time:.2f}ms")
             
         except Empty:
             continue

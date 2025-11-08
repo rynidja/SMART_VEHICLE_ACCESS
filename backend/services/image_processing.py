@@ -4,17 +4,21 @@
 import cv2
 import numpy as np
 import torch
-from ultralytics import YOLO
+from ultralytics import YOLO, utils
 from paddleocr import TextRecognition
 from typing import List, Tuple, Optional, Dict, Any
 import logging
 from datetime import datetime
 import os
 import re
+import openvino
 
 from backend.core.config import settings
 
 logger = logging.getLogger(__name__)
+utils.LOGGER.setLevel("ERROR")
+logger.setLevel(logging.INFO)
+
 
 class LicensePlateProcessor:
     """
@@ -38,14 +42,33 @@ class LicensePlateProcessor:
     def _load_models(self):
         """Load YOLO detection model and OCR reader."""
         try:
-            # Load YOLO model for plate detection
-            # In production, this should be a custom trained model for Algerian plates
             model_path = os.path.join(settings.MODELS_DIR, "yolo_plate_detection.pt")
+            use_openvino = False
+            device = self.device
+
+            if self.device == "cpu":
+                try:
+                    core = openvino.Core()
+                    if "GPU" in core.available_devices:
+                        use_openvino = True
+                        openvino_path = os.path.join(settings.MODELS_DIR, "yolo_plate_detection_openvino_model")
+                        if not os.path.exists(openvino_path):
+                            if os.path.exists(model_path):
+                                logger.info("Exporting YOLO model to OpenVINO format...")
+                                YOLO(model_path).export(format="openvino")
+                                logger.info("OpenVINO export completed")
+                            else:
+                                logger.warning("YOLO model for OpenVINO export not found")
+                        model_path = openvino_path
+                        logger.info("Using openvino for detection")
+                except Exception as e:
+                    logger.warning(f"OpenVINO setup failed: {e}")
 
             if os.path.exists(model_path):
-                self.detection_model = YOLO(model_path).to(self.device)
+                self.detection_model = YOLO(model_path)
+                if not use_openvino:
+                    self.detection_model.to(self.device)
             else:
-                # Use pre-trained YOLOv8 model as fallback
                 logger.warning("Custom plate detection model not found")
                 raise Exception("yolo_plate_detection")
 
@@ -53,9 +76,9 @@ class LicensePlateProcessor:
                 model_name="PP-OCRv5_mobile_rec",
                 device='gpu' if torch.cuda.is_available() else 'cpu',
             )
-            
+
             logger.info("Models loaded successfully")
-            
+
         except Exception as e:
             logger.error(f"Error loading models: {e}")
             raise

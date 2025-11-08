@@ -29,7 +29,7 @@ class ResultProcessor:
                 if frame is not None:
                     yield (b'--frame\r\n'
                            b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
-                await asyncio.sleep(0.03) # for ~30 fps
+                await asyncio.sleep(0.1) # for ~10 fps
         except:
             pass
 

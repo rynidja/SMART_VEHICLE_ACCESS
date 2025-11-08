@@ -71,7 +71,7 @@ class CameraManager:
             if not submitted:
                 logger.warning(f"Camera {camera_id}: worker queue full, skipping frame")
             
-            await asyncio.sleep(0.03)  # Yield control
+            await asyncio.sleep(0.100)  # Yield control
         
         cap.release()
         logger.info(f"Camera {camera_id} capture stopped")
