@@ -101,7 +101,7 @@ async def create_default_admin() -> None:
             # Create default admin user
             admin_user = User(
                 username="admin",
-                email="admin@license-scanner.local",
+                email="admin@license-scanner.dz", # pydantic doesn't validate .local
                 hashed_password=get_password_hash("admin123"),  # Change in production!
                 role="admin",
                 is_active=True

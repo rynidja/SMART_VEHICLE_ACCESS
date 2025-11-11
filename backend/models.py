@@ -14,7 +14,7 @@ class Base(DeclarativeBase):
     pass
 
 
-# modles
+# models
 class User(Base):
     __tablename__ = "users"
 
@@ -24,12 +24,12 @@ class User(Base):
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[str] = mapped_column(String(20), default="viewer")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime)
-    last_login: Mapped[datetime | None] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_login: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     created_plates = relationship("LicensePlate", back_populates="creator")
-    detections = relationship("LicensePlateDetection", back_populates="detector")
+    detections = relationship("LicensePlateDetection", back_populates="operator")
     audit_logs = relationship("AuditLog", back_populates="user")
 
 
@@ -51,9 +51,9 @@ class Camera(Base):
     roi_y: Mapped[int] = mapped_column(Integer, default=0)
     roi_width: Mapped[int] = mapped_column(Integer, default=1920)
     roi_height: Mapped[int] = mapped_column(Integer, default=1080)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime)
-    last_seen: Mapped[datetime | None] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_seen: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     detections = relationship("LicensePlateDetection", back_populates="camera")
 
@@ -62,7 +62,7 @@ class LicensePlate(Base):
     __tablename__ = "license_plates"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    plate_text: Mapped[str] = mapped_column(String(20), nullable=False)
+    plate_text: Mapped[str] = mapped_column(String(20), nullable=False, unique=True)
     plate_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     country_code: Mapped[str] = mapped_column(String(3), default="DZ")
     plate_type: Mapped[str | None] = mapped_column(String(20))
@@ -71,10 +71,10 @@ class LicensePlate(Base):
     owner_name: Mapped[str | None] = mapped_column(String(100))
     owner_contact: Mapped[str | None] = mapped_column(String(100))
     vehicle_info: Mapped[str | None] = mapped_column(Text)
-    valid_from: Mapped[datetime | None] = mapped_column(DateTime)
-    valid_until: Mapped[datetime | None] = mapped_column(DateTime)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime)
+    valid_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
 
     creator = relationship("User", back_populates="created_plates")
@@ -94,14 +94,14 @@ class LicensePlateDetection(Base):
     status: Mapped[PlateStatus] = mapped_column(Enum(PlateStatus), default=PlateStatus.UNKNOWN)
     thumbnail_path: Mapped[str | None] = mapped_column(String(255))
     processing_time_ms: Mapped[int | None] = mapped_column(Integer)
-    detected_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
     camera_id: Mapped[int] = mapped_column(ForeignKey("cameras.id"))
     plate_id: Mapped[int | None] = mapped_column(ForeignKey("license_plates.id"))
-    detector_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    operator_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
 
     camera = relationship("Camera", back_populates="detections")
     plate = relationship("LicensePlate", back_populates="detections")
-    detector = relationship("User", back_populates="detections")
+    operator = relationship("User", back_populates="detections")
 
 
 class AuditLog(Base):
@@ -118,6 +118,6 @@ class AuditLog(Base):
     details: Mapped[str | None] = mapped_column(Text)
     success: Mapped[bool] = mapped_column(Boolean, default=True)
     error_message: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
     user = relationship("User", back_populates="audit_logs")

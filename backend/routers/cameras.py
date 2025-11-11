@@ -10,11 +10,11 @@ from datetime import datetime
 import logging
 
 from backend.database import get_async_db
-from backend.models import Camera, CameraStatus
+from backend.models import Camera
 from backend.core.security import verify_token, check_permission
 from backend.schemas.auth import UserRole
 from backend.schemas.camera import (
-    CameraCreate, CameraUpdate, CameraResponse, CameraStatsResponse
+    CameraCreate, CameraUpdate, CameraResponse, CameraStatsResponse, CameraStatus
 )
 from backend.services.camera_manager import camera_manager
 from backend.services.result_processor import result_processor

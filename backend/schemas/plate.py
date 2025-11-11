@@ -11,6 +11,14 @@ class PlateStatus(str, Enum):
     UNKNOWN = "unknown"
     PENDING = "pending"
 
+    @classmethod
+    def from_flags(cls, is_authorised: bool, is_backlisted: bool) -> "PlateStatus":
+        if is_backlisted:
+            return cls.DENIED
+        if is_authorised:
+            return cls.AUTHORIZED
+        return cls.UNKNOWN
+
 # License Plate Schemas
 class PlateBase(BaseModel):
     """Base license plate schema."""
@@ -48,7 +56,7 @@ class PlateResponse(PlateBase):
     plate_hash: str
     created_at: datetime
     updated_at: Optional[datetime]
-    created_by: UserResponse
+    created_by: int
     
     class Config:
         from_attributes = True

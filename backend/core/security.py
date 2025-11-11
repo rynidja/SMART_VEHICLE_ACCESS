@@ -10,6 +10,7 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from fastapi import HTTPException, status, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from backend.schemas.auth import UserRole
 
 from backend.core.config import settings
 
