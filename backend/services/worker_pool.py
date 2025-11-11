@@ -6,6 +6,9 @@ import numpy as np
 import torch
 import cv2
 from datetime import datetime
+from backend.core.config import settings
+
+# TODO: switch to "faster-fifo"
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -38,10 +41,10 @@ def model_worker(
             start_time = datetime.now()
 
             tracker = tracker_manager.get_tracker(camera_id)
+            history = tracker_manager.get_history(camera_id)
             
             license_plates = processor.detect_license_plates(frame, tracker)
             
-            # TODO add history
             detections = []
             for plate in license_plates:
                 plate_start_time = datetime.now()
@@ -51,6 +54,18 @@ def model_worker(
                 plate_roi = processor.extract_plate_roi(frame, bbox)
                 ocr_result = processor.recognize_plate_text(plate_roi, int(id))
                 ocr_confidence = ocr_result['confidence']
+
+                prev_reading = history.get(id)
+                if not prev_reading or prev_reading[1] <= ocr_confidence:
+                    history[id] = (ocr_result, ocr_confidence)
+
+                    if len(history) > settings.HISTORY_SIZE_THRESHOLD:
+                        history.popitem(last=False)
+                else:
+                    ocr_result = prev_reading[0]
+                    ocr_confidence = prev_reading[1]
+
+                history.move_to_end(id)
 
                 detections.append({
                     'id': id,

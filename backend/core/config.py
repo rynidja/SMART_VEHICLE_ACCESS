@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     OCR_CONFIDENCE_THRESHOLD: float = 0.45
     MAX_PLATE_LENGTH: int = 10
     MIN_PLATE_LENGTH: int = 4
+    HISTORY_SIZE_THRESHOLD: int = 50
     
     # Camera Settings
     DEFAULT_FPS: int = 25
