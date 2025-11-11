@@ -39,36 +39,27 @@ def model_worker(
 
             tracker = tracker_manager.get_tracker(camera_id)
             
-            license_plates = processor.detect_license_plates(frame)
+            license_plates = processor.detect_license_plates(frame, tracker)
             
             # TODO add history
             detections = []
-            if len(license_plates) > 0:
-                tracked_plates = tracker.update(license_plates)
+            for plate in license_plates:
+                plate_start_time = datetime.now()
                 
-                for plate in tracked_plates:
-                    plate_start_time = datetime.now()
-                    x1, y1, x2, y2, track_id = plate
-                    
-                    ious = [
-                        max(0, min(x2, px2) - max(x1, px1)) *
-                        max(0, min(y2, py2) - max(y1, py1))
-                        for px1, py1, px2, py2, _ in license_plates
-                    ]
-                    confidence = license_plates[np.argmax(ious)][4] if ious else 0.0
-                    
-                    bbox = (int(x1), int(y1), int(x2), int(y2))
-                    plate_roi = processor.extract_plate_roi(frame, bbox)
-                    ocr_result = processor.recognize_plate_text(plate_roi, int(track_id))
-                    
-                    detections.append({
-                        'id': int(track_id),
-                        'bbox': bbox,
-                        'confidence': float(confidence),
-                        'ocr': ocr_result,
-                        'overall_confidence': (confidence + ocr_result['confidence']) / 2,
-                        'processing_time_ms': (datetime.now() - plate_start_time).total_seconds() * 1000
-                        })
+                id = plate['id']
+                bbox = plate['bbox']
+                plate_roi = processor.extract_plate_roi(frame, bbox)
+                ocr_result = processor.recognize_plate_text(plate_roi, int(id))
+                ocr_confidence = ocr_result['confidence']
+
+                detections.append({
+                    'id': id,
+                    'vbbox': plate['vbbox'],
+                    'bbox': bbox,
+                    'ocr': ocr_result,
+                    'overall_confidence': (plate['confidence'] + ocr_confidence) / 2,
+                    'processing_time_ms': (datetime.now() - plate_start_time).total_seconds() * 1000
+                })
             
             annotated_frame = processor.annotate_frame(frame, detections)
             ret, jpeg = cv2.imencode('.jpg', annotated_frame)
@@ -117,7 +108,7 @@ class WorkerPool:
         logger.info(f"Started {self.num_workers} workers")
     
     def submit_frame(self, camera_id: int, frame: np.ndarray, 
-                     timestamp: float):
+                     timestamp: datetime):
         """Submit frame for processing (non-blocking)"""
         worker_id = camera_id % self.num_workers # just to avoid sharing the tracker
         try:

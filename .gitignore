@@ -166,6 +166,8 @@ opencv_*
 *.pth
 *.pt
 
+*_openvino_model
+
 # Large data files
 *.mp4
 *.avi

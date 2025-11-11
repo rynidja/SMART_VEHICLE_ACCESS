@@ -29,6 +29,7 @@ class LicensePlateProcessor:
     def __init__(self):
         """Initialize the license plate processor with models and configurations."""
         self.detection_model = None
+        self.vehicle_detection_model = None
         self.ocr_reader = None
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         
@@ -44,33 +45,42 @@ class LicensePlateProcessor:
         try:
             model_path = os.path.join(settings.MODELS_DIR, "yolo_plate_detection.pt")
             use_openvino = False
-            device = self.device
 
-            if self.device == "cpu":
-                try:
-                    core = openvino.Core()
-                    if "GPU" in core.available_devices:
-                        use_openvino = True
-                        openvino_path = os.path.join(settings.MODELS_DIR, "yolo_plate_detection_openvino_model")
-                        if not os.path.exists(openvino_path):
-                            if os.path.exists(model_path):
-                                logger.info("Exporting YOLO model to OpenVINO format...")
-                                YOLO(model_path).export(format="openvino")
-                                logger.info("OpenVINO export completed")
-                            else:
-                                logger.warning("YOLO model for OpenVINO export not found")
-                        model_path = openvino_path
-                        logger.info("Using openvino for detection")
-                except Exception as e:
-                    logger.warning(f"OpenVINO setup failed: {e}")
+            if not os.path.exists(model_path):
+                raise Exception("Custom plate detection model not found")
 
-            if os.path.exists(model_path):
-                self.detection_model = YOLO(model_path)
-                if not use_openvino:
-                    self.detection_model.to(self.device)
-            else:
-                logger.warning("Custom plate detection model not found")
-                raise Exception("yolo_plate_detection")
+            try:
+                if not self.device == "cpu":
+                    raise
+
+                core = openvino.Core()
+                if not "GPU" in core.available_devices:
+                    raise
+
+                openvino_path = "yolov8n_openvino_model"
+                if not os.path.exists(openvino_path):
+                    logger.info("Exporting YOLO model to OpenVINO format...")
+                    YOLO("yolov8n.pt").export(format="openvino")
+                    logger.info("OpenVINO export completed")
+
+                self.vehicle_detection_model = YOLO(openvino_path)
+
+                openvino_path = os.path.join(settings.MODELS_DIR, "yolo_plate_detection_openvino_model")
+                if not os.path.exists(openvino_path):
+                    logger.info("Exporting YOLO LP model to OpenVINO format...")
+                    YOLO(model_path).export(format="openvino")
+                    logger.info("OpenVINO export completed")
+
+                self.detection_model = YOLO(openvino_path)
+
+                use_openvino = True
+                logger.info("Using openvino for detection")
+            except:
+                pass
+
+            if not use_openvino:
+                self.vehicle_detection_model = YOLO("yolov8n.pt").to(self.device)
+                self.detection_model = YOLO(model_path).to(self.device)
 
             self.ocr_reader = TextRecognition(
                 model_name="PP-OCRv5_mobile_rec",
@@ -112,7 +122,7 @@ class LicensePlateProcessor:
             return image
 
 
-    def detect_license_plates(self, image: np.ndarray) -> List[Dict[str, Any]]:
+    def detect_license_plates(self, image: np.ndarray, tracker) -> List[Dict[str, Any]]:
         """
         Detect license plates in the image using YOLO.
         
@@ -123,22 +133,45 @@ class LicensePlateProcessor:
             List[Dict]: List of detected plates with bounding boxes and confidence
         """
         try:
-            # Preprocess image
             processed_image = self.preprocess_image(image)
-            
-            # Run YOLO detection
-            license_plate_detections = self.detection_model(processed_image, conf=self.detection_confidence)[0]
 
-            # detect license plates
+            vehicles = []
+            detections = self.vehicle_detection_model(processed_image, conf=self.detection_confidence)[0]
+
+            for box in detections.boxes:
+                x1, y1, x2, y2 = map(int, box.xyxy[0].cpu().numpy())
+                confidence = box.conf[0].cpu().numpy()
+                class_id = int(box.cls[0].cpu().numpy())
+
+                if int(class_id) in [2, 5, 7]:
+                    vehicles.append([x1, y1, x2, y2, confidence])
+
+            if len(vehicles) == 0:
+                return []
+
+            tracked_vehicles = tracker.update(np.asarray(vehicles))
+
             license_plates = []
-            for box in license_plate_detections.boxes:
+            detections = self.detection_model(processed_image, conf=self.detection_confidence)[0]
+
+            for box in detections.boxes:
                 x1, y1, x2, y2 = map(int, box.xyxy[0].cpu().numpy())
                 confidence = box.conf[0].cpu().numpy()
 
-                license_plates.append([x1, y1, x2, y2, confidence])
+                for vehicle in tracked_vehicles:
+                    car_x1, car_y1, car_x2, car_y2, id = vehicle
 
-            return np.asarray(license_plates) if license_plates else np.empty((0, 5))
+                    if x1 > car_x1 and y1 > car_y1 and x2 < car_x2 and y2 < car_y2:
+                        license_plates.append({
+                            'id': int(id),
+                            'bbox': tuple(map(int, (x1, y1, x2, y2))),
+                            'vbbox': tuple(map(int, (car_x1, car_y1, car_x2, car_y2))),
+                            'confidence': float(confidence),
+                            })
+                        break
             
+            return license_plates
+
         except Exception as e:
             logger.error(f"Error detecting license plates: {e}")
             return []
@@ -357,17 +390,21 @@ class LicensePlateProcessor:
         annotated_frame = frame.copy()
 
         for detection in detections:
+            id = detection['id']
+            car_x1, car_y1, car_x2, car_y2 = detection['vbbox']
+            x1, y1, x2, y2 = detection['bbox']
             overall_confidence = float(detection['overall_confidence'])
+            ocr_reading = detection['ocr']['text']
 
             # TODO make color dynamic
             color = (0, 255, 0)
 
-            x1, y1, x2, y2 = detection['bbox']
-            width, height = x2 - x1, y2 - y1
-            id = detection['id']
+            cv2.rectangle(annotated_frame, (car_x1, car_y1), (car_x2, car_y2), color, 2)
+            car_label = f"Vehicle {id}"
+            cv2.putText( annotated_frame, car_label, (car_x1, max(car_y1 - 10, 20)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
 
             cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), color, 2)
-            label = f"{id}: {detection['ocr']['text']} ({overall_confidence:.2f})"
+            label = f"{ocr_reading} ({overall_confidence:.2f})"
             cv2.putText( annotated_frame, label, (x1, max(y1 - 10, 20)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
 
         return annotated_frame

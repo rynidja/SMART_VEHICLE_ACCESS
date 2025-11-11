@@ -4,6 +4,7 @@ import time
 from backend.services.worker_pool import worker_pool
 from backend.core.config import settings
 import logging
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -65,7 +66,7 @@ class CameraManager:
             submitted = worker_pool.submit_frame(
                 camera_id=camera_id,
                 frame=frame,
-                timestamp=time.time(),
+                timestamp=datetime.now(),
             )
             
             if not submitted:
